@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Lumina - LAN Remote Web Lamp</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- iOH PeerJS CDN for WebRTC P2P Sync without backend -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- QRCode.js for generating pairing QR codes -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    /* Custom CSS for seamless fullscreen and touch safety */
+    html, body {
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      -webkit-user-select: none;
+      overflow: hidden;
+      background-color: #0b0f19;
+      color: #f3f4f6;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    /* Color picker canvas custom cursor */
+    #colorWheel {
+      cursor: crosshair;
+      border-radius: 9999px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+
+    /* Range slider custom styling */
+    input[type=range] {
+      -webkit-appearance: none;
+      background: transparent;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 24px;
+      width: 24px;
+      border-radius: 50%;
+      background: #ffffff;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+      margin-top: -8px;
+    }
+    input[type=range]::-webkit-slider-runnable-track {
+      width: 100%;
+      height: 8px;
+      cursor: pointer;
+      background: #374151;
+      border-radius: 4px;
+    }
+
+    /* Smooth glow for lamp transitions */
+    .lamp-glow {
+      transition: background-color 0.15s linear, opacity 0.15s linear;
+    }
+
+    /* Glassmorphism panel styling */
+    .glass-panel {
+      background: rgba(17, 24, 39, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+  </style>
+</head>
+<body class="h-screen w-screen relative">
+
+  <div id="modeSelector" class="absolute inset-0 z-50 flex flex-col items-center justify-center p-6 bg-slate-950 text-center">
+    <div class="max-w-md w-full space-y-8">
+      <div>
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/20 text-indigo-400 mb-4 ring-1 ring-indigo-500/30">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+          </svg>
+        </div>
+        <h1 class="text-3xl font-bold tracking-tight text-white">Lumina Ambient</h1>
+        <p class="mt-2 text-sm text-gray-400">Turn an old device into a smart ambient light controlled over LAN</p>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 pt-4">
+        <button id="btnSelectLamp" onclick="initMode('lamp')" class="flex items-center p-4 rounded-xl glass-panel hover:bg-slate-800/80 transition text-left group border border-slate-700/50 hover:border-indigo-500/50">
+          <div class="p-3 rounded-lg bg-amber-500/10 text-amber-400 mr-4 group-hover:scale-105 transition-transform">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="font-semibold text-lg text-white">Use as Light Display</h2>
+            <p class="text-xs text-gray-400">Open on iPod Touch, tablet, or secondary display device</p>
+          </div>
+        </button>
+
+        <button id="btnSelectController" onclick="initMode('controller')" class="flex items-center p-4 rounded-xl glass-panel hover:bg-slate-800/80 transition text-left group border border-slate-700/50 hover:border-indigo-500/50">
+          <div class="p-3 rounded-lg bg-indigo-500/10 text-indigo-400 mr-4 group-hover:scale-105 transition-transform">
+            <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"/>
+            </svg>
+          </div>
+          <div>
+            <h2 class="font-semibold text-lg text-white">Use as Remote Controller</h2>
+            <p class="text-xs text-gray-400">Control color, brightness, and effects from your main phone</p>
+          </div>
+        </button>
+      </div>
+
+      <div class="text-xs text-gray-500 pt-6">
+        No installation or server setup required. Works using peer-to-peer WebRTC.
+      </div>
+    </div>
+  </div>
+
+  <div id="lampView" class="hidden absolute inset-0 z-10 select-none">
+    <!-- Lamp Canvas Fill -->
+    <div id="lampCanvas" class="w-full h-full lamp-glow bg-amber-100" style="background-color: #ffb74d; opacity: 1.0;"></div>
+
+    <!-- Minimal Overlay HUD for pairing/settings -->
+    <div id="lampOverlay" class="absolute inset-0 bg-black/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center transition-opacity duration-300">
+      <div class="max-w-xs w-full bg-slate-900/90 p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+        <h2 class="text-xl font-bold text-white">Lamp Ready</h2>
+        
+        <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
+          <p class="text-xs text-gray-400 mb-1">Pairing Room Code</p>
+          <div id="lampRoomCode" class="text-3xl font-mono font-bold tracking-widest text-indigo-400">----</div>
+        </div>
+
+        <div id="qrcode" class="flex justify-center p-2 bg-white rounded-xl mx-auto w-fit"></div>
+
+        <div class="text-xs text-gray-400">
+          Scan QR or enter code on your Remote Controller device.
+        </div>
+
+        <div id="wakeLockStatus" class="text-xs text-amber-400 hidden">
+          ⚠️ Screen Wake Lock inactive. Touch screen once to keep alive.
+        </div>
+
+        <button onclick="toggleLampOverlay(false)" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-medium rounded-xl text-sm transition">
+          Hide Overlay / Start Light
+        </button>
+      </div>
+    </div>
+
+    <!-- Hidden Un-hide Button in corner for touch displays -->
+    <button onclick="toggleLampOverlay(true)" class="absolute top-4 right-4 z-20 p-3 bg-black/20 hover:bg-black/40 text-white/50 hover:text-white rounded-full backdrop-blur-sm transition opacity-20 hover:opacity-100">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+    </button>
+  </div>
+
+  <div id="controllerView" class="hidden absolute inset-0 z-20 overflow-y-auto bg-slate-950 p-4 sm:p-6">
+    <div class="max-w-md mx-auto space-y-6 pb-12">
+      
+      <!-- Top Bar / Connection Status -->
+      <div class="flex items-center justify-between glass-panel p-4 rounded-2xl">
+        <div class="flex items-center space-x-3">
+          <div id="statusIndicator" class="w-3 h-3 rounded-full bg-red-500 animate-pulse"></div>
+          <div>
+            <h2 class="text-sm font-semibold text-white">Lumina Controller</h2>
+            <p id="connectionText" class="text-xs text-gray-400">Disconnected</p>
+          </div>
+        </div>
+        <button onclick="showPairingModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium text-gray-300 rounded-lg border border-slate-700 transition">
+          Pair Code
+        </button>
+      </div>
+
+      <!-- Main Power & Color Preview Header -->
+      <div class="glass-panel p-5 rounded-2xl flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+          <div id="activeColorPreview" class="w-12 h-12 rounded-xl shadow-lg border border-white/20 transition-all" style="background-color: #ffb74d;"></div>
+          <div>
+            <span class="text-xs uppercase tracking-wider text-gray-400 font-medium">Selected Color</span>
+            <div id="hexCodeText" class="text-lg font-mono font-bold text-white">#FFB74D</div>
+          </div>
+        </div>
+        <button id="powerBtn" onclick="togglePower()" class="p-3.5 rounded-2xl bg-indigo-600 text-white shadow-lg hover:bg-indigo-500 active:scale-95 transition">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Custom Interactive RGB Wheel Canvas -->
+      <div class="glass-panel p-5 rounded-2xl flex flex-col items-center">
+        <span class="text-xs text-gray-400 self-start mb-3 font-medium">COLOR WHEEL</span>
+        <canvas id="colorWheel" width="220" height="220" class="touch-none"></canvas>
+      </div>
+
+      <!-- Brightness Slider -->
+      <div class="glass-panel p-5 rounded-2xl space-y-3">
+        <div class="flex justify-between items-center text-sm">
+          <span class="text-xs text-gray-400 font-medium">BRIGHTNESS / DIMMER</span>
+          <span id="brightnessVal" class="font-mono text-xs text-indigo-400 font-bold">100%</span>
+        </div>
+        <input id="brightnessSlider" type="range" min="5" max="100" value="100" oninput="updateBrightness(this.value)" class="w-full">
+      </div>
+
+      <!-- Preset Quick Swatches -->
+      <div class="glass-panel p-5 rounded-2xl space-y-3">
+        <span class="text-xs text-gray-400 font-medium block">PRESETS</span>
+        <div class="grid grid-cols-3 gap-2.5">
+          <button onclick="applyPreset('#FFD1A4', 100)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-500/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#FFD1A4;"></span>
+            <span class="text-[10px] text-gray-300">Warm White</span>
+          </button>
+          <button onclick="applyPreset('#F4F6FF', 100)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-blue-500/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#F4F6FF;"></span>
+            <span class="text-[10px] text-gray-300">Cool White</span>
+          </button>
+          <button onclick="applyPreset('#FF5500', 90)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-orange-500/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#FF5500;"></span>
+            <span class="text-[10px] text-gray-300">Sunset</span>
+          </button>
+          <button onclick="applyPreset('#00F0FF', 85)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#00F0FF;"></span>
+            <span class="text-[10px] text-gray-300">Cyber Neon</span>
+          </button>
+          <button onclick="applyPreset('#FF8C00', 70)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-amber-600/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#FF8C00;"></span>
+            <span class="text-[10px] text-gray-300">Candlelight</span>
+          </button>
+          <button onclick="applyPreset('#FF0033', 50)" class="p-2.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-red-500/50 flex flex-col items-center space-y-1 transition">
+            <span class="w-5 h-5 rounded-full" style="background:#FF0033;"></span>
+            <span class="text-[10px] text-gray-300">Night Red</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Mood Effects (Color Cycling) -->
+      <div class="glass-panel p-5 rounded-2xl space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-white">Color Cycle Effect</h3>
+            <p class="text-xs text-gray-400">Smooth ambient rainbow transition</p>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input id="cycleToggle" type="checkbox" onchange="toggleColorCycle(this.checked)" class="sr-only peer">
+            <div class="w-11 h-6 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+          </label>
+        </div>
+
+        <div id="cycleSpeedContainer" class="space-y-2 opacity-50 pointer-events-none transition-opacity">
+          <div class="flex justify-between items-center text-xs">
+            <span class="text-gray-400">Cycle Speed</span>
+            <span id="cycleSpeedVal" class="font-mono text-gray-300">Medium</span>
+          </div>
+          <input id="cycleSpeedSlider" type="range" min="1" max="10" value="5" oninput="updateCycleSpeed(this.value)" class="w-full">
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="pairingModal" class="hidden absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="max-w-xs w-full glass-panel p-6 rounded-2xl space-y-4">
+      <h3 class="text-lg font-bold text-white">Connect to Lamp</h3>
+      <p class="text-xs text-gray-400">Enter the 4-character Room Code displayed on your light screen device.</p>
+      
+      <input id="roomCodeInput" type="text" maxlength="4" placeholder="e.g. A1B2" class="w-full text-center text-2xl font-mono uppercase bg-slate-900 border border-slate-700 focus:border-indigo-500 rounded-xl py-2.5 text-white tracking-widest focus:outline-none">
+
+      <div class="flex space-x-2 pt-2">
+        <button onclick="closePairingModal()" class="w-1/2 py-2 px-3 bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-medium rounded-xl">Cancel</button>
+        <button onclick="connectToLampFromInput()" class="w-1/2 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-xl">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* State Management */
+    let currentRole = null; // 'lamp' or 'controller'
+    let peer = null;
+    let peerConn = null;
+    let broadcastChannel = null;
+    let roomCode = '';
+    
+    // Light settings state
+    let state = {
+      color: '#FFB74D',
+      brightness: 100,
+      power: true,
+      cycling: false,
+      cycleSpeed: 5
+    };
+
+    // Cycle Effect Timer Variable
+    let cycleInterval = null;
+    let cycleHue = 0;
+
+    /* Initialize Mode Selection */
+    function initMode(role) {
+      currentRole = role;
+      document.getElementById('modeSelector').classList.add('hidden');
+
+      // Initialize local BroadcastChannel for tab-to-tab fallback
+      if ('BroadcastChannel' in window) {
+        broadcastChannel = new BroadcastChannel('lumina_lamp_channel');
+        broadcastChannel.onmessage = (e) => handleStateUpdate(e.data);
+      }
+
+      // Check URL search parameters for automatic pair code (e.g. from QR code)
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlRoom = urlParams.get('room');
+
+      if (role === 'lamp') {
+        document.getElementById('lampView').classList.remove('hidden');
+        setupLampPeer(urlRoom);
+        enableWakeLock();
+      } else {
+        document.getElementById('controllerView').classList.remove('hidden');
+        drawColorWheel();
+        if (urlRoom) {
+          setupControllerPeer(urlRoom);
+        } else {
+          showPairingModal();
+        }
+      }
+    }
+
+    /* PeerJS Light Display (Lamp) Setup */
+    function setupLampPeer(forcedCode) {
+      // Generate short 4-character ID
+      roomCode = forcedCode || Math.random().toString(36).substring(2, 6).toUpperCase();
+      document.getElementById('lampRoomCode').innerText = roomCode;
+
+      // Render QR Code for easy smartphone scanning
+      const qrContainer = document.getElementById('qrcode');
+      qrContainer.innerHTML = '';
+      const pairUrl = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+      new QRCode(qrContainer, {
+        text: pairUrl,
+        width: 120,
+        height: 120,
+        colorDark: "#000000",
+        colorLight: "#ffffff",
+        correctLevel: QRCode.CorrectLevel.L
+      });
+
+      // Connect to public PeerJS broker server
+      const peerId = `lumina-lamp-${roomCode}`;
+      peer = new Peer(peerId);
+
+      peer.on('open', (id) => {
+        console.log('Lamp Peer registered with ID:', id);
+      });
+
+      peer.on('connection', (conn) => {
+        peerConn = conn;
+        console.log('Controller connected to Lamp');
+        
+        // Hide pairing overlay automatically upon connection
+        toggleLampOverlay(false);
+
+        // Receive remote command state
+        conn.on('data', (data) => {
+          handleStateUpdate(data);
+        });
+
+        conn.on('close', () => {
+          toggleLampOverlay(true);
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.warn('PeerJS error:', err);
+      });
+
+      // Render default state
+      renderLampState();
+    }
+
+    /* PeerJS Controller Setup */
+    function setupControllerPeer(code) {
+      roomCode = code.toUpperCase();
+      const targetPeerId = `lumina-lamp-${roomCode}`;
+
+      if (peer) peer.destroy();
+      peer = new Peer();
+
+      peer.on('open', () => {
+        console.log('Connecting to Lamp:', targetPeerId);
+        peerConn = peer.connect(targetPeerId);
+
+        peerConn.on('open', () => {
+          updateConnectionStatus(true, `Connected to ${roomCode}`);
+          closePairingModal();
+          // Send initial controller state
+          syncState();
+        });
+
+        peerConn.on('close', () => {
+          updateConnectionStatus(false, 'Disconnected');
+        });
+      });
+
+      peer.on('error', (err) => {
+        console.error('Peer error:', err);
+        updateConnectionStatus(false, 'Connection Failed');
+      });
+    }
+
+    function connectToLampFromInput() {
+      const code = document.getElementById('roomCodeInput').value.trim();
+      if (code.length === 4) {
+        setupControllerPeer(code);
+      }
+    }
+
+    function showPairingModal() {
+      document.getElementById('pairingModal').classList.remove('hidden');
+    }
+
+    function closePairingModal() {
+      document.getElementById('pairingModal').classList.add('hidden');
+    }
+
+    /* State Sync & Dispatcher */
+    function syncState() {
+      if (currentRole !== 'controller') return;
+
+      // 1. Send via PeerJS WebRTC Connection
+      if (peerConn && peerConn.open) {
+        peerConn.send(state);
+      }
+
+      // 2. Broadcast via local BroadcastChannel
+      if (broadcastChannel) {
+        broadcastChannel.postMessage(state);
+      }
+
+      // Update Controller UI Elements locally
+      updateControllerUI();
+    }
+
+    function handleStateUpdate(data) {
+      state = { ...state, ...data };
+      if (currentRole === 'lamp') {
+        renderLampState();
+      } else {
+        updateControllerUI();
+      }
+    }
+
+    /* Render Lamp Visual Display */
+    function renderLampState() {
+      const canvas = document.getElementById('lampCanvas');
+      if (!state.power) {
+        canvas.style.backgroundColor = '#000000';
+        canvas.style.opacity = '0';
+        return;
+      }
+
+      canvas.style.backgroundColor = state.color;
+      canvas.style.opacity = (state.brightness / 100).toString();
+    }
+
+    /* Controller Actions */
+    function togglePower() {
+      state.power = !state.power;
+      const powerBtn = document.getElementById('powerBtn');
+      if (state.power) {
+        powerBtn.classList.remove('bg-gray-700');
+        powerBtn.classList.add('bg-indigo-600');
+      } else {
+        powerBtn.classList.remove('bg-indigo-600');
+        powerBtn.classList.add('bg-gray-700');
+      }
+      syncState();
+    }
+
+    function updateBrightness(val) {
+      state.brightness = parseInt(val, 10);
+      document.getElementById('brightnessVal').innerText = `${val}%`;
+      syncState();
+    }
+
+    function applyPreset(hexColor, brightnessVal) {
+      state.color = hexColor;
+      state.brightness = brightnessVal;
+      state.cycling = false;
+      document.getElementById('cycleToggle').checked = false;
+      toggleColorCycleUI(false);
+      
+      document.getElementById('brightnessSlider').value = brightnessVal;
+      document.getElementById('brightnessVal').innerText = `${brightnessVal}%`;
+      
+      syncState();
+    }
+
+    function toggleColorCycle(enabled) {
+      state.cycling = enabled;
+      toggleColorCycleUI(enabled);
+
+      if (enabled) {
+        startCycleLoop();
+      } else {
+        stopCycleLoop();
+      }
+      syncState();
+    }
+
+    function toggleColorCycleUI(enabled) {
+      const container = document.getElementById('cycleSpeedContainer');
+      if (enabled) {
+        container.classList.remove('opacity-50', 'pointer-events-none');
+      } else {
+        container.classList.add('opacity-50', 'pointer-events-none');
+      }
+    }
+
+    function updateCycleSpeed(val) {
+      state.cycleSpeed = parseInt(val, 10);
+      const labels = ['Very Slow', 'Slow', 'Medium', 'Fast', 'Very Fast'];
+      const index = Math.min(Math.floor((val - 1) / 2), 4);
+      document.getElementById('cycleSpeedVal').innerText = labels[index];
+      
+      if (state.cycling) {
+        startCycleLoop();
+      }
+    }
+
+    function startCycleLoop() {
+      stopCycleLoop();
+      const intervalMs = Math.max(20, 200 - (state.cycleSpeed * 18));
+      cycleInterval = setInterval(() => {
+        cycleHue = (cycleHue + 1) % 360;
+        state.color = `hsl(${cycleHue}, 100%, 50%)`;
+        syncState();
+      }, intervalMs);
+    }
+
+    function stopCycleLoop() {
+      if (cycleInterval) clearInterval(cycleInterval);
+    }
+
+    function updateControllerUI() {
+      document.getElementById('activeColorPreview').style.backgroundColor = state.color;
+      document.getElementById('hexCodeText').innerText = state.color.toUpperCase();
+    }
+
+    function updateConnectionStatus(connected, text) {
+      const indicator = document.getElementById('statusIndicator');
+      const connText = document.getElementById('connectionText');
+
+      if (connected) {
+        indicator.classList.remove('bg-red-500', 'animate-pulse');
+        indicator.classList.add('bg-emerald-500');
+        connText.innerText = text;
+        connText.classList.remove('text-gray-400');
+        connText.classList.add('text-emerald-400');
+      } else {
+        indicator.classList.remove('bg-emerald-500');
+        indicator.classList.add('bg-red-500', 'animate-pulse');
+        connText.innerText = text;
+        connText.classList.remove('text-emerald-400');
+        connText.classList.add('text-gray-400');
+      }
+    }
+
+    function toggleLampOverlay(show) {
+      const overlay = document.getElementById('lampOverlay');
+      if (show) {
+        overlay.classList.remove('opacity-0', 'pointer-events-none');
+      } else {
+        overlay.classList.add('opacity-0', 'pointer-events-none');
+      }
+    }
+
+    /* Screen Wake Lock API (To keep screen active on target iPod/Tablet) */
+    async function enableWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          await navigator.wakeLock.request('screen');
+          console.log('Screen Wake Lock activated');
+        } else {
+          document.getElementById('wakeLockStatus').classList.remove('hidden');
+        }
+      } catch (err) {
+        console.warn('Wake Lock request failed:', err);
+        document.getElementById('wakeLockStatus').classList.remove('hidden');
+      }
+    }
+
+    /* HTML5 Canvas Color Wheel Renderer & Picker */
+    function drawColorWheel() {
+      const canvas = document.getElementById('colorWheel');
+      const ctx = canvas.getContext('2d');
+      const radius = canvas.width / 2;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let angle = 0; angle < 360; angle += 1) {
+        const startAngle = (angle - 2) * Math.PI / 180;
+        const endAngle = (angle + 2) * Math.PI / 180;
+
+        ctx.beginPath();
+        ctx.moveTo(radius, radius);
+        ctx.arc(radius, radius, radius - 5, startAngle, endAngle);
+        ctx.closePath();
+
+        const gradient = ctx.createRadialGradient(radius, radius, 0, radius, radius, radius - 5);
+        gradient.addColorStop(0, '#FFFFFF');
+        gradient.addColorStop(1, `hsl(${angle}, 100%, 50%)`);
+
+        ctx.fillStyle = gradient;
+        ctx.fill();
+      }
+
+      // Handle touch and mouse selection on canvas
+      function pickColor(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+
+        const pixel = ctx.getImageData(x, y, 1, 1).data;
+        if (pixel[3] > 0) { // Check non-transparent
+          const hex = "#" + ((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1);
+          state.color = hex;
+          state.cycling = false;
+          document.getElementById('cycleToggle').checked = false;
+          toggleColorCycleUI(false);
+          stopCycleLoop();
+          syncState();
+        }
+      }
+
+      let isDragging = false;
+      canvas.addEventListener('mousedown', (e) => { isDragging = true; pickColor(e); });
+      canvas.addEventListener('mousemove', (e) => { if (isDragging) pickColor(e); });
+      window.addEventListener('mouseup', () => isDragging = false);
+
+      canvas.addEventListener('touchstart', (e) => { isDragging = true; pickColor(e); }, { passive: true });
+      canvas.addEventListener('touchmove', (e) => { if (isDragging) pickColor(e); }, { passive: true });
+      canvas.addEventListener('touchend', () => isDragging = false);
+    }
+  </script>
+</body>
+</html>
